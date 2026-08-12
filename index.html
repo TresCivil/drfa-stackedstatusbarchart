@@ -138,6 +138,8 @@ const DEFAULT_PAYLOAD = {
   rowLabelAlign: "right",          // "right" | "left"
   valueLabels: "inline",           // "inline" | "none"
   darkMode: false,
+  sortRows: "total-desc",          // "total-desc" | "total-asc" | "none"
+  hideEmptyRows: true,             // drop rows whose stacked total is 0
 
   seriesColors: [
     { name: "Picked Up",                  color: "#FACC15" },
@@ -204,6 +206,8 @@ function render(payload){
     rowLabelAlign: payload.rowLabelAlign || "right",
     valueLabels: payload.valueLabels || "inline",
     darkMode: !!payload.darkMode,
+    sortRows: payload.sortRows || "none", // "total-desc" | "total-asc" | "none" (source order)
+    hideEmptyRows: payload.hideEmptyRows !== false, // true by default — set false to keep 0-total rows visible
     seriesColors: payload.seriesColors || [],
     fontSizes: Object.assign({ title: 16, axis: 13, value: 13, segment: 12, legend: 12 }, payload.fontSizes || {}),
     dimensions: Object.assign({
@@ -232,6 +236,12 @@ function render(payload){
     rowMap[d.row][d.series] = (rowMap[d.row][d.series] || 0) + (Number(d.value) || 0);
   });
 
+  const rowTotal = row => Object.values(rowMap[row]).reduce((a, b) => a + b, 0);
+
+  let visibleRows = p.hideEmptyRows ? rowOrder.filter(r => rowTotal(r) > 0) : rowOrder;
+  if (p.sortRows === "total-desc") visibleRows.sort((a, b) => rowTotal(b) - rowTotal(a));
+  if (p.sortRows === "total-asc")  visibleRows.sort((a, b) => rowTotal(a) - rowTotal(b));
+
   // title
   const titleEl = document.getElementById("chart-title");
   titleEl.textContent = p.title;
@@ -251,7 +261,7 @@ function render(payload){
   // rows
   const rowsEl = document.getElementById("rows");
   rowsEl.style.gap = p.dimensions.rowGap + "px";
-  rowsEl.innerHTML = rowOrder.map(rowName => {
+  rowsEl.innerHTML = visibleRows.map(rowName => {
     const values = rowMap[rowName];
     const total = seriesOrder.reduce((sum, s) => sum + (values[s] || 0), 0);
 
