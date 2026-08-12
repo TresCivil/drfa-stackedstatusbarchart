@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stacked Status Bar</title>
+<style>
+  :root{
+    --card-bg: #ffffff;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --label-text: #444444;
+    --total-text: #666666;
+    --title-text: #1f2937;
+    --font: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  }
+
+  body[data-theme="dark"]{
+    --card-bg: #262626;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --label-text: #cfcfcf;
+    --total-text: #a0a0a0;
+    --title-text: #f5f5f5;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body{
+    margin:0;
+    padding:0;
+    background: transparent; /* embeds cleanly in a PCF iframe */
+    font-family: var(--font);
+  }
+
+  .card{
+    background: var(--card-bg);
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+  }
+
+  .card-title{
+    margin: 0 0 14px;
+    font-weight: 700;
+    color: var(--title-text);
+  }
+
+  .legend{
+    display:flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    margin-bottom: 16px;
+    color: var(--label-text);
+  }
+  .legend-item{
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .legend-swatch{
+    width:10px;
+    height:10px;
+    border-radius:2px;
+    flex-shrink:0;
+  }
+
+  .rows{
+    display:flex;
+    flex-direction:column;
+  }
+
+  .row{
+    display:flex;
+    align-items:center;
+    gap: 14px;
+  }
+
+  .row-label{
+    flex-shrink:0;
+    color: var(--label-text);
+  }
+  .row-label.align-left{ text-align:left; }
+  .row-label.align-right{ text-align:right; }
+
+  .bar-track{
+    flex:1;
+    display:flex;
+    overflow:hidden;
+    background: rgba(127,127,127,0.12); /* shows if a row totals 0 */
+  }
+
+  .segment{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:#fff;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 6px;
+    transition: filter 0.15s ease;
+  }
+  .segment:hover{ filter: brightness(1.06); }
+
+  .row-total{
+    flex-shrink:0;
+    color: var(--total-text);
+  }
+</style>
+</head>
+<body>
+
+<div class="card" id="card">
+  <h3 class="card-title" id="chart-title"></h3>
+  <div class="legend" id="legend"></div>
+  <div class="rows" id="rows"></div>
+</div>
+
+<script>
+/* ============================================================
+   PAYLOAD SCHEMA — same shape as your other drfa-stackedbar
+   chart, passed via URL hash from Power Fx:
+
+   "https://<your-pages-repo>/index.html?v=1#" & EncodeUrl(JSON(
+       { title, mode, rowLabelAlign, valueLabels, darkMode,
+         seriesColors, fontSizes, dimensions, seriesOrder, data },
+       JSONFormat.Compact & JSONFormat.FlattenValueTables
+   ))
+
+   "data" is long-format: one row per {row, series, value} triple —
+   matches ForAll(src, {row: ..., series: ..., value: ...}).
+
+   When there's no hash (e.g. opening this file directly in a
+   browser to preview/tweak it), DEFAULT_PAYLOAD below is used
+   instead — edit it freely for local testing.
+   ============================================================ */
+const DEFAULT_PAYLOAD = {
+  title: "Status by Damage Type",
+  mode: "stacked",                 // "stacked" (only mode implemented here)
+  rowLabelAlign: "right",          // "right" | "left"
+  valueLabels: "inline",           // "inline" | "none"
+  darkMode: false,
+
+  seriesColors: [
+    { name: "Picked Up",                  color: "#FACC15" },
+    { name: "Scoped - In Progress",       color: "#F7630C" },
+    { name: "Scoped",                     color: "#6366F1" },
+    { name: "Construction - In Progress", color: "#0095FF" },
+    { name: "Construction - Completed",   color: "#10B981" }
+  ],
+
+  fontSizes: { title: 16, axis: 13, value: 13, segment: 12.5, legend: 13 },
+
+  // bar height, corner rounding, spacing, padding — all editable here
+  dimensions: {
+    cardPadding:   "20px 24px 24px",
+    barHeight:     40,
+    barRadius:     20,
+    rowGap:        14,
+    legendGap:     18,
+    rowLabelWidth: 150,
+    totalWidth:    64
+  },
+
+  seriesOrder: ["Picked Up", "Scoped - In Progress", "Scoped",
+                "Construction - In Progress", "Construction - Completed"],
+
+  data: [
+    { row: "Damage Type 1", series: "Picked Up", value: 20 },
+    { row: "Damage Type 1", series: "Scoped - In Progress", value: 15 },
+    { row: "Damage Type 1", series: "Scoped", value: 10 },
+    { row: "Damage Type 1", series: "Construction - In Progress", value: 8 },
+    { row: "Damage Type 1", series: "Construction - Completed", value: 25 },
+    { row: "Damage Type 2", series: "Picked Up", value: 12 },
+    { row: "Damage Type 2", series: "Scoped - In Progress", value: 22 },
+    { row: "Damage Type 2", series: "Scoped", value: 5 },
+    { row: "Damage Type 2", series: "Construction - In Progress", value: 18 },
+    { row: "Damage Type 2", series: "Construction - Completed", value: 30 },
+    { row: "Damage Type 3", series: "Picked Up", value: 8 },
+    { row: "Damage Type 3", series: "Scoped - In Progress", value: 10 },
+    { row: "Damage Type 3", series: "Scoped", value: 14 },
+    { row: "Damage Type 3", series: "Construction - In Progress", value: 12 },
+    { row: "Damage Type 3", series: "Construction - Completed", value: 40 }
+  ]
+};
+
+function loadPayload(){
+  const hash = window.location.hash;
+  if (!hash || hash.length < 2) return DEFAULT_PAYLOAD;
+  try {
+    return JSON.parse(decodeURIComponent(hash.slice(1)));
+  } catch (e) {
+    console.error("Could not parse payload from URL hash — falling back to DEFAULT_PAYLOAD.", e);
+    return DEFAULT_PAYLOAD;
+  }
+}
+
+function formatNum(num){
+  if (num >= 1000) return (num / 1000).toFixed(num % 1000 === 0 ? 0 : 1) + "k";
+  return String(num);
+}
+
+function render(payload){
+  const p = {
+    title: payload.title || "",
+    rowLabelAlign: payload.rowLabelAlign || "right",
+    valueLabels: payload.valueLabels || "inline",
+    darkMode: !!payload.darkMode,
+    seriesColors: payload.seriesColors || [],
+    fontSizes: Object.assign({ title: 16, axis: 13, value: 13, segment: 12, legend: 12 }, payload.fontSizes || {}),
+    dimensions: Object.assign({
+      cardPadding: "20px 24px 24px", barHeight: 40, barRadius: 20,
+      rowGap: 14, legendGap: 18, rowLabelWidth: 130, totalWidth: 64
+    }, payload.dimensions || {}),
+    seriesOrder: payload.seriesOrder || [],
+    data: payload.data || []
+  };
+
+  document.body.dataset.theme = p.darkMode ? "dark" : "light";
+
+  const card = document.getElementById("card");
+  card.style.padding = p.dimensions.cardPadding;
+
+  const colorMap = {};
+  p.seriesColors.forEach(s => colorMap[s.name] = s.color);
+
+  const seriesOrder = p.seriesOrder.length ? p.seriesOrder : [...new Set(p.data.map(d => d.series))];
+
+  // group long-format data by row, preserving first-seen row order
+  const rowOrder = [];
+  const rowMap = {};
+  p.data.forEach(d => {
+    if (!rowMap[d.row]) { rowMap[d.row] = {}; rowOrder.push(d.row); }
+    rowMap[d.row][d.series] = (rowMap[d.row][d.series] || 0) + (Number(d.value) || 0);
+  });
+
+  // title
+  const titleEl = document.getElementById("chart-title");
+  titleEl.textContent = p.title;
+  titleEl.style.fontSize = p.fontSizes.title + "px";
+
+  // legend
+  const legendEl = document.getElementById("legend");
+  legendEl.style.fontSize = p.fontSizes.legend + "px";
+  legendEl.style.gap = p.dimensions.legendGap + "px";
+  legendEl.innerHTML = seriesOrder.map(name => `
+    <div class="legend-item">
+      <span class="legend-swatch" style="background:${colorMap[name] || "#999"}"></span>
+      <span>${name}</span>
+    </div>
+  `).join("");
+
+  // rows
+  const rowsEl = document.getElementById("rows");
+  rowsEl.style.gap = p.dimensions.rowGap + "px";
+  rowsEl.innerHTML = rowOrder.map(rowName => {
+    const values = rowMap[rowName];
+    const total = seriesOrder.reduce((sum, s) => sum + (values[s] || 0), 0);
+
+    const visible = seriesOrder
+      .map(name => ({ name, color: colorMap[name] || "#999", val: values[name] || 0 }))
+      .filter(s => s.val > 0);
+
+    const segments = visible.map((s, i) => {
+      const pct = total > 0 ? (s.val / total) * 100 : 0;
+      const isFirst = i === 0;
+      const isLast = i === visible.length - 1;
+      const r = p.dimensions.barRadius;
+      const radius = `${isFirst ? r : 0}px ${isLast ? r : 0}px ${isLast ? r : 0}px ${isFirst ? r : 0}px`;
+      const label = p.valueLabels === "none" ? "" : `<span>${formatNum(s.val)}</span>`;
+      return `<div class="segment" style="flex-basis:${pct}%; background:${s.color}; border-radius:${radius}; font-size:${p.fontSizes.segment}px">
+                ${label}
+              </div>`;
+    }).join("");
+
+    return `
+      <div class="row">
+        <div class="row-label align-${p.rowLabelAlign}" style="font-size:${p.fontSizes.axis}px; width:${p.dimensions.rowLabelWidth}px">${rowName}</div>
+        <div class="bar-track" style="height:${p.dimensions.barHeight}px; border-radius:${p.dimensions.barRadius}px">${segments}</div>
+        <div class="row-total" style="font-size:${p.fontSizes.value}px; width:${p.dimensions.totalWidth}px">${formatNum(total)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+render(loadPayload());
+</script>
+
+</body>
+</html>
