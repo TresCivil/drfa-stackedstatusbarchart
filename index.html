@@ -141,46 +141,50 @@ const DEFAULT_PAYLOAD = {
   sortRows: "total-desc",          // "total-desc" | "total-asc" | "none"
   hideEmptyRows: true,             // drop rows whose stacked total is 0
 
+  // stage = color (legend)
   seriesColors: [
-    { name: "Picked Up",                  color: "#FACC15" },
-    { name: "Scoped - In Progress",       color: "#F7630C" },
-    { name: "Scoped",                     color: "#6366F1" },
-    { name: "Construction - In Progress", color: "#0095FF" },
-    { name: "Construction - Completed",   color: "#10B981" }
+    { name: "Scope",        color: "#FACC15" },
+    { name: "Pick-up",      color: "#F7630C" },
+    { name: "Estimated",    color: "#6366F1" },
+    { name: "Approval",     color: "#0095FF" },
+    { name: "Construction", color: "#10B981" }
   ],
+  seriesOrder: ["Scope", "Pick-up", "Estimated", "Approval", "Construction"],
+
+  // status within a stage = opacity, in 3 tiers (not a full legend — see legendSubtitle below)
+  statusOrder: ["Not Required", "Completed - No Work Required", "Not Started", "In Progress", "Completed"],
+  statusOpacity: {
+    "Not Required": 0.3,
+    "Completed - No Work Required": 0.3,
+    "Not Started": 0.55,
+    "In Progress": 0.55,
+    "Completed": 1
+  },
+  legendSubtitle: "Full color = Completed · Lighter = Not Started / In Progress · Palest = Not Required / Completed - No Work Required",
 
   fontSizes: { title: 16, axis: 13, value: 13, segment: 12.5, legend: 13 },
 
   // bar height, corner rounding, spacing, padding — all editable here
   dimensions: {
     cardPadding:   "20px 24px 24px",
-    barHeight:     40,
-    barRadius:     20,
-    rowGap:        14,
+    barHeight:     28,
+    barRadius:     14,
+    rowGap:        10,
     legendGap:     18,
     rowLabelWidth: 150,
     totalWidth:    64
   },
 
-  seriesOrder: ["Picked Up", "Scoped - In Progress", "Scoped",
-                "Construction - In Progress", "Construction - Completed"],
-
   data: [
-    { row: "Damage Type 1", series: "Picked Up", value: 20 },
-    { row: "Damage Type 1", series: "Scoped - In Progress", value: 15 },
-    { row: "Damage Type 1", series: "Scoped", value: 10 },
-    { row: "Damage Type 1", series: "Construction - In Progress", value: 8 },
-    { row: "Damage Type 1", series: "Construction - Completed", value: 25 },
-    { row: "Damage Type 2", series: "Picked Up", value: 12 },
-    { row: "Damage Type 2", series: "Scoped - In Progress", value: 22 },
-    { row: "Damage Type 2", series: "Scoped", value: 5 },
-    { row: "Damage Type 2", series: "Construction - In Progress", value: 18 },
-    { row: "Damage Type 2", series: "Construction - Completed", value: 30 },
-    { row: "Damage Type 3", series: "Picked Up", value: 8 },
-    { row: "Damage Type 3", series: "Scoped - In Progress", value: 10 },
-    { row: "Damage Type 3", series: "Scoped", value: 14 },
-    { row: "Damage Type 3", series: "Construction - In Progress", value: 12 },
-    { row: "Damage Type 3", series: "Construction - Completed", value: 40 }
+    { row: "Damage Type 1", series: "Scope",        status: "Not Started", value: 6 },
+    { row: "Damage Type 1", series: "Pick-up",      status: "In Progress", value: 15 },
+    { row: "Damage Type 1", series: "Estimated",    status: "Completed",   value: 10 },
+    { row: "Damage Type 1", series: "Construction", status: "In Progress", value: 8 },
+    { row: "Damage Type 1", series: "Construction", status: "Completed",   value: 25 },
+    { row: "Damage Type 2", series: "Scope",        status: "Not Required", value: 5 },
+    { row: "Damage Type 2", series: "Pick-up",      status: "Completed",   value: 22 },
+    { row: "Damage Type 2", series: "Approval",     status: "Completed - No Work Required", value: 9 },
+    { row: "Damage Type 2", series: "Construction", status: "Completed",   value: 30 }
   ]
 };
 
@@ -215,8 +219,21 @@ function render(payload){
       rowGap: 14, legendGap: 18, rowLabelWidth: 130, totalWidth: 64
     }, payload.dimensions || {}),
     seriesOrder: payload.seriesOrder || [],
+    statusOrder: payload.statusOrder || [],
+    statusOpacity: payload.statusOpacity || {},
+    legendSubtitle: payload.legendSubtitle || "",
     data: payload.data || []
   };
+
+  // blends a hex color toward white by (1 - opacity), so low-opacity statuses
+  // read as a pale tint of the stage color rather than a semi-transparent
+  // overlay (which would let the gray track show through inconsistently)
+  function shade(hex, opacity){
+    const n = parseInt(hex.replace("#", ""), 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const mix = c => Math.round(c * opacity + 255 * (1 - opacity));
+    return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+  }
 
   document.body.dataset.theme = p.darkMode ? "dark" : "light";
 
@@ -227,16 +244,20 @@ function render(payload){
   p.seriesColors.forEach(s => colorMap[s.name] = s.color);
 
   const seriesOrder = p.seriesOrder.length ? p.seriesOrder : [...new Set(p.data.map(d => d.series))];
+  const statusOrder = p.statusOrder.length ? p.statusOrder : [...new Set(p.data.map(d => d.status).filter(Boolean))];
 
-  // group long-format data by row, preserving first-seen row order
+  // group long-format data by row -> series -> status, preserving first-seen row order
   const rowOrder = [];
   const rowMap = {};
   p.data.forEach(d => {
     if (!rowMap[d.row]) { rowMap[d.row] = {}; rowOrder.push(d.row); }
-    rowMap[d.row][d.series] = (rowMap[d.row][d.series] || 0) + (Number(d.value) || 0);
+    if (!rowMap[d.row][d.series]) rowMap[d.row][d.series] = {};
+    const statusKey = d.status || "_";
+    rowMap[d.row][d.series][statusKey] = (rowMap[d.row][d.series][statusKey] || 0) + (Number(d.value) || 0);
   });
 
-  const rowTotal = row => Object.values(rowMap[row]).reduce((a, b) => a + b, 0);
+  const seriesTotal = (row, series) => Object.values(rowMap[row]?.[series] || {}).reduce((a, b) => a + b, 0);
+  const rowTotal = row => seriesOrder.reduce((sum, s) => sum + seriesTotal(row, s), 0);
 
   let visibleRows = p.hideEmptyRows ? rowOrder.filter(r => rowTotal(r) > 0) : rowOrder;
   if (p.sortRows === "total-desc") visibleRows.sort((a, b) => rowTotal(b) - rowTotal(a));
@@ -247,36 +268,58 @@ function render(payload){
   titleEl.textContent = p.title;
   titleEl.style.fontSize = p.fontSizes.title + "px";
 
-  // legend
+  // legend — stage colors, plus a second row showing what each opacity means
   const legendEl = document.getElementById("legend");
   legendEl.style.fontSize = p.fontSizes.legend + "px";
   legendEl.style.gap = p.dimensions.legendGap + "px";
-  legendEl.innerHTML = seriesOrder.map(name => `
+
+  const stageLegend = seriesOrder.map(name => `
     <div class="legend-item">
       <span class="legend-swatch" style="background:${colorMap[name] || "#999"}"></span>
       <span>${name}</span>
     </div>
   `).join("");
 
+  legendEl.innerHTML = stageLegend;
+
+  const subtitleId = "legend-subtitle";
+  document.getElementById(subtitleId)?.remove();
+  if (p.legendSubtitle) {
+    legendEl.insertAdjacentHTML("afterend", `<div id="${subtitleId}" style="font-size:${p.fontSizes.legend - 1}px; color:var(--total-text); margin:-8px 0 16px">${p.legendSubtitle}</div>`);
+  }
+
   // rows
   const rowsEl = document.getElementById("rows");
   rowsEl.style.gap = p.dimensions.rowGap + "px";
   rowsEl.innerHTML = visibleRows.map(rowName => {
-    const values = rowMap[rowName];
-    const total = seriesOrder.reduce((sum, s) => sum + (values[s] || 0), 0);
+    const total = rowTotal(rowName);
 
-    const visible = seriesOrder
-      .map(name => ({ name, color: colorMap[name] || "#999", val: values[name] || 0 }))
-      .filter(s => s.val > 0);
+    // flatten to one entry per (stage, status) that has a positive value
+    const parts = [];
+    seriesOrder.forEach(stage => {
+      const byStatus = rowMap[rowName]?.[stage] || {};
+      statusOrder.forEach(status => {
+        const val = byStatus[status] || 0;
+        if (val > 0) parts.push({ stage, status, val });
+      });
+      // catch any status not in statusOrder (e.g. data sent without a status field)
+      Object.keys(byStatus).forEach(k => {
+        if (!statusOrder.includes(k) && byStatus[k] > 0) parts.push({ stage, status: null, val: byStatus[k] });
+      });
+    });
 
-    const segments = visible.map((s, i) => {
-      const pct = total > 0 ? (s.val / total) * 100 : 0;
+    const segments = parts.map((part, i) => {
+      const pct = total > 0 ? (part.val / total) * 100 : 0;
       const isFirst = i === 0;
-      const isLast = i === visible.length - 1;
+      const isLast = i === parts.length - 1;
       const r = p.dimensions.barRadius;
       const radius = `${isFirst ? r : 0}px ${isLast ? r : 0}px ${isLast ? r : 0}px ${isFirst ? r : 0}px`;
-      const label = p.valueLabels === "none" ? "" : `<span>${formatNum(s.val)}</span>`;
-      return `<div class="segment" style="flex-basis:${pct}%; background:${s.color}; border-radius:${radius}; font-size:${p.fontSizes.segment}px">
+      const baseColor = colorMap[part.stage] || "#999";
+      const opacity = part.status && p.statusOpacity[part.status] != null ? p.statusOpacity[part.status] : 1;
+      const bg = shade(baseColor, opacity);
+      const label = p.valueLabels === "none" ? "" : `<span>${formatNum(part.val)}</span>`;
+      const title = part.status ? `${part.stage} — ${part.status}: ${part.val}` : `${part.stage}: ${part.val}`;
+      return `<div class="segment" title="${title}" style="flex-basis:${pct}%; background:${bg}; border-radius:${radius}; font-size:${p.fontSizes.segment}px">
                 ${label}
               </div>`;
     }).join("");
